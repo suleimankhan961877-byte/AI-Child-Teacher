@@ -186,15 +186,45 @@ def make_scene_image(scene, index, total, style):
     d.text((110,620), f"Style: {style}", font=small_font, fill=(100,110,130))
     return img
 
+def get_ffmpeg():
+    """Find FFmpeg automatically.
+
+    Priority:
+    1. FFmpeg already installed on the system/PATH.
+    2. FFmpeg binary bundled by imageio-ffmpeg (installed by requirements.txt).
+
+    This means Windows users normally do not need to manually add FFmpeg to PATH.
+    """
+    import shutil
+
+    system_ffmpeg = shutil.which("ffmpeg")
+    if system_ffmpeg:
+        return system_ffmpeg
+
+    try:
+        import imageio_ffmpeg
+        binary = imageio_ffmpeg.get_ffmpeg_exe()
+        if binary and Path(binary).exists():
+            return binary
+    except Exception as e:
+        raise RuntimeError(
+            "Automatic FFmpeg setup failed. Please run: "
+            "pip install --upgrade imageio-ffmpeg"
+        ) from e
+
+    raise RuntimeError(
+        "FFmpeg could not be found. Please run: "
+        "pip install --upgrade imageio-ffmpeg"
+    )
+
+
 def create_slideshow_video(lesson, style, fps=12):
-    # Uses FFmpeg when available. Produces a real MP4 from generated HD slide graphics.
-    ffmpeg = "ffmpeg"
-    if os.name == "nt":
-        # ffmpeg.exe must be on PATH; otherwise show a clear message.
-        ffmpeg = "ffmpeg"
+    """Create a 1280x720 MP4 without requiring a system FFmpeg installation."""
+    ffmpeg = get_ffmpeg()
 
     scene_files = []
     total = len(lesson["scenes"])
+
     for i, scene in enumerate(lesson["scenes"], 1):
         img = make_scene_image(scene, i, total, style)
         path = OUTPUT_DIR / f"scene_{i:02d}.png"
@@ -202,28 +232,58 @@ def create_slideshow_video(lesson, style, fps=12):
         scene_files.append(path)
 
     concat = OUTPUT_DIR / "concat.txt"
-    # Give each scene an equal visual duration.
+
+    # FFmpeg concat demuxer requires forward-slash paths and escaped quotes.
+    def ffmpeg_path(p):
+        return str(p.resolve()).replace("\\", "/").replace("'", r"'\''")
+
     with concat.open("w", encoding="utf-8") as f:
         for p in scene_files:
-            f.write(f"file '{p.as_posix()}'\n")
+            f.write(f"file '{ffmpeg_path(p)}'\n")
             f.write("duration 5\n")
-        f.write(f"file '{scene_files[-1].as_posix()}'\n")
+        # Repeat final frame so the last duration is honored.
+        f.write(f"file '{ffmpeg_path(scene_files[-1])}'\n")
 
     out = OUTPUT_DIR / "learnora_lesson.mp4"
+
     cmd = [
-        ffmpeg, "-y", "-f", "concat", "-safe", "0",
+        ffmpeg, "-y",
+        "-f", "concat",
+        "-safe", "0",
         "-i", str(concat),
-        "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
-        "-r", str(fps), "-c:v", "libx264", "-preset", "medium",
-        "-crf", "18", "-movflags", "+faststart", str(out)
+        "-vf",
+        "scale=1280:720:force_original_aspect_ratio=decrease,"
+        "pad=1280:720:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
+        "-r", str(fps),
+        "-c:v", "libx264",
+        "-preset", "medium",
+        "-crf", "18",
+        "-movflags", "+faststart",
+        str(out),
     ]
+
     try:
-        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        result = subprocess.run(
+            cmd,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if not out.exists() or out.stat().st_size == 0:
+            raise RuntimeError("FFmpeg completed but did not create a valid MP4.")
         return out
-    except FileNotFoundError:
-        raise RuntimeError("FFmpeg is not installed or is not on PATH. Install FFmpeg, restart the terminal, then run the app again.")
+    except FileNotFoundError as e:
+        raise RuntimeError(
+            "Automatic FFmpeg setup failed. Please run "
+            "`pip install --upgrade imageio-ffmpeg`, then restart Streamlit."
+        ) from e
     except subprocess.CalledProcessError as e:
-        raise RuntimeError("FFmpeg could not create the MP4. Check that FFmpeg has H.264/libx264 support.")
+        details = (e.stderr or "")[-1800:]
+        raise RuntimeError(
+            "FFmpeg could not create the MP4. "
+            "The most recent FFmpeg message was:\\n\\n" + details
+        ) from e
 
 def create_voice_audio(text, voice="en"):
     # Optional local narration using edge-tts. This is not a Groq capability.
@@ -253,8 +313,9 @@ def create_voice_audio(text, voice="en"):
 
 def attach_audio(video_path, audio_path):
     out = OUTPUT_DIR / "learnora_lesson_with_voice.mp4"
+    ffmpeg = get_ffmpeg()
     cmd = [
-        "ffmpeg","-y","-i",str(video_path),"-i",str(audio_path),
+        ffmpeg,"-y","-i",str(video_path),"-i",str(audio_path),
         "-map","0:v:0","-map","1:a:0","-c:v","copy","-c:a","aac",
         "-shortest","-movflags","+faststart",str(out)
     ]
@@ -272,6 +333,11 @@ with st.sidebar:
     if key:
         st.session_state["groq_key"] = key
     st.caption("Groq is used for lesson planning and teacher narration text. Video rendering is performed locally.")
+    try:
+        ffmpeg_status = get_ffmpeg()
+        st.success("🎬 Video engine ready")
+    except Exception:
+        st.warning("🎬 Video engine will be installed automatically with imageio-ffmpeg.")
 
 st.subheader("1. Build your lesson")
 c1, c2 = st.columns(2)
@@ -322,7 +388,7 @@ if lesson:
             st.write("**Example:**", scene["example"])
 
     st.subheader("🎬 Create downloadable HD animation")
-    st.info("The current version creates a 1280×720 MP4 slideshow with illustrated graphics. The narration script is generated by Groq. Optional local text-to-speech can add teacher voice.")
+    st.info("The app creates a 1280×720 MP4 slideshow with illustrated graphics. FFmpeg is handled automatically through imageio-ffmpeg, so you normally do not need to install FFmpeg manually. The narration script is generated by Groq; optional local text-to-speech can add teacher voice.")
 
     if st.button("🎥 Render HD Video", type="primary"):
         try:

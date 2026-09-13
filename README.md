@@ -1,77 +1,56 @@
-# Learnora AI
+# Learnora AI — Fixed Video Engine
 
-Learnora AI is a Python + Streamlit educational prototype that uses Groq to generate:
-- age-appropriate lesson plans
-- multilingual teacher scripts
-- scene-by-scene visual prompts
-- examples and short quizzes
-- downloadable 1280×720 MP4 educational animations
-- optional teacher voice using local `edge-tts`
+This version fixes the `FFmpeg is not installed or is not on PATH` problem.
 
-## Important architecture note
+## What changed
 
-Groq provides the AI lesson/storyboard and teacher narration text. It is not a video-generation API. This project therefore renders the animation locally with Pillow + FFmpeg. This keeps the video pipeline inexpensive and avoids pretending that the Groq API itself generates video.
+The application now:
+- checks whether FFmpeg is already installed;
+- automatically uses the FFmpeg binary supplied by `imageio-ffmpeg` when system FFmpeg is unavailable;
+- uses the same automatic FFmpeg resolver when adding teacher narration;
+- keeps the video output at 1280×720;
+- uses `openai/gpt-oss-120b` instead of the deprecated `llama-3.3-70b-versatile`.
 
-## Files
+## Installation
 
-- `app.py` — main Streamlit application
-- `requirements.txt` — Python dependencies
-- `.env.example` — API-key template
-
-## 1. Install Python
-
-Use Python 3.10+.
-
-## 2. Install packages
+Open Command Prompt/PowerShell in the project folder:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-## 3. Install FFmpeg
-
-FFmpeg must be installed separately and available on your PATH.
-
-Verify:
+Then start Streamlit:
 
 ```bash
-ffmpeg -version
+python -m streamlit run app.py
 ```
 
-## 4. Create Groq API key
+You normally do NOT need to install FFmpeg separately.
 
-Create a Groq API key from the Groq console.
-
-You can either:
-- enter the key in the app sidebar, or
-- set the `GROQ_API_KEY` environment variable.
-
-Do not commit a real API key to GitHub.
-
-## 5. Run
+If automatic FFmpeg setup fails, run:
 
 ```bash
-streamlit run app.py
+python -m pip install --upgrade imageio-ffmpeg
 ```
 
-## 6. Workflow
+and restart Streamlit.
 
-1. Enter a topic.
-2. Select child age.
-3. Select one or more teaching languages.
-4. Select Simple / Medium / Advanced.
-5. Select Short / Medium / Long.
-6. Choose an animation style.
-7. Click **Generate AI Lesson**.
-8. Review every scene and the teacher narration.
-9. Click **Render HD Video**.
-10. Download the MP4.
-11. Generate optional teacher voice.
-12. Download the video with voice.
-13. If the animation does not fit, enter an animation change request and regenerate.
+## Groq
 
-## Production upgrade path
+Enter your Groq API key in the application sidebar, or set:
 
-For truly generative high-resolution images/video rather than local illustrated slides, connect a dedicated image/video generation service to the `visual_prompt` field. Keep Groq as the lesson-planning/orchestration model.
+```text
+GROQ_API_KEY=your_key_here
+```
 
-The current app intentionally has no hard-coded image/video vendor, so you can add one later without changing the educational workflow.
+Do not publish a real API key in GitHub.
+
+## Video workflow
+
+1. Generate the lesson.
+2. Review scenes and narration.
+3. Click **Render HD Video**.
+4. The app generates the illustrated MP4.
+5. Generate teacher voice if desired.
+6. Download the MP4 with narration.
