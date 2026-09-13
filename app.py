@@ -53,7 +53,7 @@ def groq_text(prompt, system):
     if client is None:
         raise RuntimeError("Please enter your Groq API key in the sidebar.")
     result = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="openai/gpt-oss-120b",
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
