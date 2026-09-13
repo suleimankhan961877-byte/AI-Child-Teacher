@@ -54,3 +54,24 @@ Do not publish a real API key in GitHub.
 4. The app generates the illustrated MP4.
 5. Generate teacher voice if desired.
 6. Download the MP4 with narration.
+
+
+## Teacher voice update
+
+The teacher narration is now built from the complete lesson. It:
+- introduces the topic;
+- explains each scene;
+- reads important on-screen text;
+- describes what the child should notice in the picture;
+- explains the example;
+- transitions between scenes;
+- asks review questions;
+- closes the lesson.
+
+The narration is generated as speech with `edge-tts` and then combined with the MP4 using FFmpeg.
+
+If voice generation does not work, reinstall:
+
+```bash
+python -m pip install --upgrade edge-tts
+```

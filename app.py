@@ -285,8 +285,12 @@ def create_slideshow_video(lesson, style, fps=12):
             "The most recent FFmpeg message was:\\n\\n" + details
         ) from e
 
-def create_voice_audio(text, voice="en"):
-    # Optional local narration using edge-tts. This is not a Groq capability.
+def create_voice_audio(text, voice="English"):
+    """Generate a natural teacher-style narration with edge-tts.
+
+    The lesson script is generated scene-by-scene so the teacher explains
+    every scene instead of simply reading the visual labels.
+    """
     try:
         import edge_tts
     except ImportError:
@@ -300,24 +304,105 @@ def create_voice_audio(text, voice="en"):
         "Spanish": "es-ES-ElviraNeural",
         "French": "fr-FR-DeniseNeural",
     }
+
     chosen = voice_map.get(voice, "en-US-AriaNeural")
-    audio = OUTPUT_DIR / f"narration_{voice.lower()}.mp3"
+    audio = OUTPUT_DIR / f"teacher_narration_{voice.lower()}.mp3"
+
+    # Add punctuation and teaching cues so the TTS engine pauses naturally.
+    narration = " ".join(str(text).replace("\n", " ").split())
+    if not narration:
+        return None
+
     try:
         import asyncio
+
         async def run():
-            await edge_tts.Communicate(text, chosen).save(str(audio))
+            communicate = edge_tts.Communicate(
+                narration,
+                chosen,
+                rate="-5%",
+                volume="+0%",
+                pitch="+0Hz",
+            )
+            await communicate.save(str(audio))
+
         asyncio.run(run())
-        return audio if audio.exists() else None
+        return audio if audio.exists() and audio.stat().st_size > 0 else None
     except Exception:
         return None
+
+
+def build_teacher_script(lesson, language):
+    """Create a complete teacher script that explicitly teaches each scene.
+
+    This is separate from the visual text: the teacher explains the concept,
+    points out what children should notice, gives an example, and transitions
+    to the next scene.
+    """
+    parts = []
+
+    intro = lesson.get("teacher_intro", "")
+    if intro:
+        parts.append(f"Hello everyone! {intro}")
+
+    for i, scene in enumerate(lesson.get("scenes", []), 1):
+        heading = scene.get("heading", "")
+        key = scene.get("on_screen_text", "")
+        visual = scene.get("visual_prompt", "")
+        example = scene.get("example", "")
+        narration = scene.get("teacher_narration", "")
+
+        # Use the AI-written teacher narration as the main explanation.
+        if narration:
+            parts.append(f"Let's look at scene {i}. {narration}")
+
+        # Explicitly read important on-screen words/text.
+        if key:
+            parts.append(f"Now let's read the important words together: {key}.")
+
+        # Explain the visual instead of merely naming it.
+        if visual:
+            parts.append(
+                f"Look carefully at the picture. We are showing {visual}. "
+                "Notice the important parts and how they help us understand the idea."
+            )
+
+        if example:
+            parts.append(
+                f"Here is an example. {example}. "
+                "Think about how this example connects to what we just learned."
+            )
+
+        parts.append("Great! Let's move to the next part.")
+
+    quiz = lesson.get("quiz", [])
+    if quiz:
+        parts.append(
+            "Before we finish, let's check what we learned. "
+            "Try to answer these questions yourself."
+        )
+        for q in quiz:
+            parts.append(f"Question: {q.get('question', '')}. Take a moment to think.")
+
+    parts.append("Excellent work! You have completed today's lesson.")
+    return " ".join(parts)
+
 
 def attach_audio(video_path, audio_path):
     out = OUTPUT_DIR / "learnora_lesson_with_voice.mp4"
     ffmpeg = get_ffmpeg()
     cmd = [
-        ffmpeg,"-y","-i",str(video_path),"-i",str(audio_path),
-        "-map","0:v:0","-map","1:a:0","-c:v","copy","-c:a","aac",
-        "-shortest","-movflags","+faststart",str(out)
+        ffmpeg, "-y",
+        "-i", str(video_path),
+        "-i", str(audio_path),
+        "-map", "0:v:0",
+        "-map", "1:a:0",
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-shortest",
+        "-movflags", "+faststart",
+        str(out),
     ]
     try:
         subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -406,12 +491,13 @@ if lesson:
             st.download_button("⬇️ Download HD MP4", f, "learnora_lesson.mp4", "video/mp4",
                                use_container_width=True)
 
-    st.subheader("🗣️ Teacher voice")
+    st.subheader("🗣️ Teacher voice — read + explain every scene")
     voice_language = st.selectbox("Voice language", languages, key="voice_language")
-    all_script = "\n\n".join(s["teacher_narration"] for s in lesson["scenes"])
-    st.text_area("Complete teacher narration", all_script, height=220)
+    all_script = build_teacher_script(lesson, voice_language)
+    st.info("The teacher voice does not only read the headings. It explains the concept, reads important on-screen words, describes the picture, gives the example, and asks the child a review question.")
+    st.text_area("Complete teacher narration — reads and explains the lesson", all_script, height=300)
 
-    if st.button("🔊 Generate Teacher Voice"):
+    if st.button("🔊 Generate Teacher Voice", type="primary"):
         audio = create_voice_audio(all_script, voice_language)
         if audio:
             st.session_state["audio"] = str(audio)
